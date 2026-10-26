@@ -75,7 +75,7 @@ export const EMERGENCY_RULES: Rule[] = [
     timeframe: 'now',
     title: 'Fever during cancer treatment',
     message:
-      'Call your cancer care team’s 24-hour number right now. If you cannot reach them, call 911 or go to the emergency room.',
+      "Call your cancer care team’s 24-hour number right now. If you cannot reach them, call 911 or go to the emergency room.",
     explanation:
       'Some cancer treatments lower the cells that fight germs. A fever can mean a serious infection that needs care right away.',
     specialty: 'medical_oncology',
