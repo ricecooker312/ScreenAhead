@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.env
+.env.*
+!.env.example
+coverage/
+.expo/
+web-build/
+clinical-review/
+clinical-content.json
+*.log
+__pycache__/

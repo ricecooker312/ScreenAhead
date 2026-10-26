@@ -1,0 +1,24 @@
+{
+  "expo": {
+    "name": "CareCompass",
+    "slug": "carecompass",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "scheme": "carecompass",
+    "userInterfaceStyle": "light",
+    "backgroundColor": "#F4F8FF",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "org.example.carecompass",
+      "config": { "usesNonExemptEncryption": false }
+    },
+    "android": {
+      "package": "org.example.carecompass",
+      "allowBackup": false
+    },
+    "plugins": ["expo-secure-store"],
+    "extra": {
+      "privacyNote": "No analytics or advertising SDKs are included. Do not add any that receive health data."
+    }
+  }
+}

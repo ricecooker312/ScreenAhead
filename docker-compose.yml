@@ -1,0 +1,24 @@
+# Local development stack: MongoDB + API.
+#   docker compose up -d
+#   docker compose exec api node dist/seed/seed.js     # demo data (refused when NODE_ENV=production)
+# Not a production configuration (no TLS, no auth on MongoDB).
+services:
+  mongo:
+    image: mongo:7
+    restart: unless-stopped
+    ports: ["127.0.0.1:27017:27017"]
+    volumes: [mongo-data:/data/db]
+  api:
+    build: ./backend
+    restart: unless-stopped
+    depends_on: [mongo]
+    ports: ["4000:4000"]
+    environment:
+      NODE_ENV: development
+      PORT: 4000
+      MONGODB_URI: mongodb://mongo:27017/carecompass
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:-dev-only-secret-change-me-dev-only-secret}
+      ENABLE_API_DOCS: "true"
+      LOG_LEVEL: info
+volumes:
+  mongo-data:

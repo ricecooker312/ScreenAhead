@@ -1,0 +1,867 @@
+openapi: 3.1.0
+info:
+  title: CareCompass API
+  version: 0.1.0
+  description: |
+    REST API for CareCompass, a cancer support, risk-guidance and specialist-connection app.
+
+    **Important:** CareCompass is an educational and care-navigation tool. It does not diagnose,
+    predict cancer, or prescribe. The triage engine is a deterministic ruleset that must be
+    clinically reviewed before production use.
+
+    All private endpoints require `Authorization: Bearer <accessToken>`. Records owned by another
+    user always return `404` (their existence is not revealed).
+servers:
+  - url: http://localhost:4000
+    description: Local development
+tags:
+  - name: Auth
+  - name: Users
+  - name: HealthProfile
+  - name: Questionnaires
+  - name: Triage
+  - name: Symptoms
+  - name: Providers
+  - name: Resources
+  - name: Appointments
+  - name: Connections
+    description: Patient-controlled sharing and messaging with verified clinicians
+  - name: Dashboard
+  - name: Admin
+
+components:
+  securitySchemes:
+    bearer:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    Id:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, pattern: '^[a-f0-9]{24}$' }
+    Page:
+      name: page
+      in: query
+      schema: { type: integer, minimum: 1, default: 1 }
+    Limit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+  responses:
+    Error:
+      description: Error
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    NoContent:
+      description: No content
+  schemas:
+    Error:
+      type: object
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: { type: string, examples: [BAD_REQUEST, UNAUTHORIZED, FORBIDDEN, NOT_FOUND, CONFLICT, RATE_LIMITED, INTERNAL] }
+            message: { type: string }
+            details: {}
+    PageMeta:
+      type: object
+      properties:
+        page: { type: integer }
+        limit: { type: integer }
+        total: { type: integer }
+        totalPages: { type: integer }
+    Session:
+      type: object
+      properties:
+        accessToken: { type: string, description: 'JWT, short-lived (default 15 minutes)' }
+        refreshToken: { type: string, description: 'Opaque, rotated on every refresh' }
+        user: { $ref: '#/components/schemas/User' }
+    User:
+      type: object
+      properties:
+        _id: { type: string }
+        email: { type: string, format: email }
+        displayName: { type: string }
+        role: { type: string, enum: [patient, clinician, admin] }
+        status: { type: string, enum: [active, suspended, deleted] }
+        onboardingCategories:
+          type: array
+          items: { type: string, enum: [diagnosed, symptoms, increased_risk, screening_prevention, in_treatment, survivor, supporting_someone, other_concern] }
+        onboardingComplete: { type: boolean }
+        settings:
+          type: object
+          properties:
+            preferredLanguage: { type: string }
+            largeText: { type: boolean }
+            reduceMotion: { type: boolean }
+            showDefinitions: { type: boolean }
+        consents:
+          type: array
+          items:
+            type: object
+            properties:
+              type: { type: string, enum: [terms, privacy, health_data, clinician_sharing] }
+              version: { type: string }
+              grantedAt: { type: string, format: date-time }
+        clinician:
+          type: object
+          properties:
+            credentials: { type: string }
+            specialty: { type: string }
+            organization: { type: string }
+            verificationStatus: { type: string, enum: [pending, verified, rejected] }
+    HealthProfile:
+      type: object
+      description: Every field is optional. Only collect what the feature needs.
+      properties:
+        dateOfBirth: { type: string, format: date }
+        age: { type: integer }
+        heightCm: { type: number }
+        weightKg: { type: number }
+        medicalConditions: { type: array, items: { type: string } }
+        cancerHistory:
+          type: array
+          items:
+            type: object
+            properties:
+              cancerType: { type: string }
+              diagnosedYear: { type: integer }
+              status: { type: string, enum: [current, remission, unknown] }
+              treatments: { type: array, items: { type: string } }
+        currentTreatments: { type: array, items: { type: string } }
+        previousTreatments: { type: array, items: { type: string } }
+        allergies:
+          type: array
+          items: { type: object, properties: { substance: { type: string }, reaction: { type: string } } }
+        medications:
+          type: array
+          items:
+            type: object
+            properties:
+              name: { type: string }
+              note: { type: string }
+              containsAcetaminophen: { type: string, enum: [yes, no, unknown] }
+        familyHistory:
+          type: array
+          items:
+            type: object
+            properties:
+              relation: { type: string, enum: [parent, sibling, child, grandparent, aunt_uncle, other] }
+              condition: { type: string }
+              ageAtDiagnosis: { type: integer }
+        hereditarySyndromes: { type: array, items: { type: string } }
+        geneticTestSummary: { type: string }
+        smoking: { type: string, enum: [never, former, current, prefer_not] }
+        alcohol: { type: string, enum: [none, occasional, one_two_daily, three_plus_daily, prefer_not] }
+        dietPattern: { type: string }
+        bowelHabits: { type: string }
+        existingProviders:
+          type: array
+          items: { type: object, properties: { name: { type: string }, role: { type: string }, phone: { type: string } } }
+        postalCode: { type: string }
+    Answers:
+      type: object
+      description: "Map of question id → answer. Special values: na (not applicable, scales), unknown, prefer_not."
+      additionalProperties:
+        oneOf:
+          - { type: string }
+          - { type: number }
+          - { type: boolean }
+          - { type: array, items: { type: string } }
+          - { type: 'null' }
+      examples:
+        - breathing: normal
+          severe_abdominal_pain: 'no'
+          symptoms: [bowel_change]
+          severity: 3
+    QuestionnaireDefinition:
+      type: object
+      properties:
+        version: { type: string }
+        sections:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: string }
+              title: { type: string }
+              intro: { type: string }
+              showIf: { type: object }
+              questions:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id: { type: string }
+                    type: { type: string, enum: [single, multi, scale, text, number, date] }
+                    label: { type: string }
+                    why: { type: string }
+                    help: { type: string }
+                    options: { type: array, items: { type: object, properties: { value: { type: string }, label: { type: string }, exclusive: { type: boolean } } } }
+                    min: { type: number }
+                    max: { type: number }
+                    required: { type: boolean }
+                    allowNotApplicable: { type: boolean }
+                    allowUnknown: { type: boolean }
+                    allowPreferNot: { type: boolean }
+                    safetyCritical: { type: boolean }
+                    showIf: { type: object, description: 'Condition: {q, eq} | {q, in} | {q, includes} | {q, includesAny} | {q, gte} | {q, answered} | {all} | {any} | {not}' }
+    Questionnaire:
+      type: object
+      properties:
+        _id: { type: string }
+        version: { type: string }
+        responses: { $ref: '#/components/schemas/Answers' }
+        questionsPresented: { type: array, items: { type: string } }
+        status: { type: string, enum: [in_progress, submitted, abandoned] }
+        currentSection: { type: string }
+        submittedAt: { type: string, format: date-time }
+    Warning:
+      type: object
+      properties:
+        ruleId: { type: string }
+        level: { type: string, enum: [emergency, prompt, info] }
+        timeframe: { type: string, enum: [now, today, soon, routine, unknown] }
+        title: { type: string }
+        message: { type: string }
+        explanation: { type: string }
+    Triage:
+      type: object
+      properties:
+        rulesetVersion: { type: string }
+        careLevel: { type: string, enum: [emergency, prompt, routine, insufficient_information] }
+        timeframe: { type: string, enum: [now, today, soon, routine, unknown] }
+        headline: { type: string }
+        warnings: { type: array, items: { $ref: '#/components/schemas/Warning' } }
+        nextSteps:
+          type: array
+          items: { type: object, properties: { id: { type: string }, title: { type: string }, detail: { type: string }, specialty: { type: string } } }
+        indicators:
+          type: object
+          description: Internal bookkeeping values. Not medical predictions. Never displayed as a risk score.
+          properties:
+            severity: { type: [integer, 'null'] }
+            dietIssues: { type: integer, enum: [0, 1] }
+            pastCancer: { type: integer, enum: [0, 1] }
+            potentialToWorsen: { type: integer, minimum: 1, maximum: 10 }
+        supportOptions: { type: array, items: { type: string } }
+        medication:
+          type: object
+          properties:
+            status: { type: string, enum: [not_requested, withheld_emergency, not_suitable, consult_first, general_info] }
+            title: { type: string }
+            message: { type: string }
+            reasons: { type: array, items: { type: string } }
+            cautions: { type: array, items: { type: string } }
+        comfort:
+          type: object
+          properties:
+            show: { type: boolean }
+            note: { type: string }
+            options: { type: array, items: { type: object } }
+            excluded: { type: array, items: { type: object } }
+        disclaimers: { type: array, items: { type: string } }
+    Recommendation:
+      type: object
+      properties:
+        category: { type: string, enum: [emergency, professional_assessment, medication_info, comfort_support, nutrition, screening_risk, emotional_support, survivorship, caregiver, insufficient_information] }
+        title: { type: string }
+        body: { type: string }
+        bullets: { type: array, items: { type: string } }
+        resourceTopics: { type: array, items: { type: string } }
+        specialties: { type: array, items: { type: string } }
+    SymptomEntryInput:
+      type: object
+      required: [symptomType]
+      additionalProperties: false
+      properties:
+        symptomType: { type: string, maxLength: 80 }
+        severity: { type: [integer, 'null'], minimum: 1, maximum: 10, description: 'Omit or null for not applicable' }
+        startDate: { type: string, format: date }
+        durationText: { type: string }
+        frequency: { type: string, enum: [constant, intermittent, occasional, once] }
+        associatedSymptoms: { type: array, items: { type: string } }
+        changeSinceLast: { type: string, enum: [better, same, worse, first_entry] }
+        interventions:
+          type: array
+          items: { type: object, properties: { measure: { type: string }, effect: { type: string, enum: [helped, no_difference, worse, unsure] } } }
+        notes: { type: string }
+        notesForAppointment: { type: string }
+        recordedAt: { type: string, format: date-time }
+    Provider:
+      type: object
+      properties:
+        _id: { type: string }
+        name: { type: string }
+        credentials: { type: string }
+        specialties:
+          type: array
+          items: { type: string, enum: [medical_oncology, gastroenterology, colorectal_surgery, surgical_oncology, radiation_oncology, genetic_counseling, primary_care, oncology_nursing_navigation, oncology_dietitian, mental_health, rehabilitation_survivorship] }
+        focusAreas: { type: array, items: { type: string } }
+        organization: { type: string }
+        location: { type: object, properties: { addressLine: { type: string }, city: { type: string }, state: { type: string }, postalCode: { type: string } } }
+        contact: { type: object, properties: { phone: { type: string }, email: { type: string } } }
+        website: { type: string }
+        bookingUrl: { type: string }
+        insuranceAccepted: { type: [object, 'null'], description: 'Only present when verified' }
+        languages: { type: [object, 'null'], description: 'Only present when verified' }
+        telehealth: { type: [object, 'null'], description: 'Only present when verified' }
+        verification: { type: object, properties: { status: { type: string, enum: [verified, unverified, demo] }, source: { type: string }, lastVerifiedAt: { type: string, format: date-time } } }
+        isDemo: { type: boolean }
+        label: { type: string, description: 'Human-readable verification label, e.g. "Demonstration data — not a real provider"' }
+        saved: { type: boolean }
+    Resource:
+      type: object
+      properties:
+        _id: { type: string }
+        slug: { type: string }
+        title: { type: string }
+        topics: { type: array, items: { type: string } }
+        summary: { type: string }
+        body: { type: string }
+        source: { type: object, properties: { name: { type: string }, url: { type: string }, publishedOrReviewed: { type: string } } }
+        lastReviewedAt: { type: string, format: date-time }
+        reviewedBy: { type: string }
+    Appointment:
+      type: object
+      required: [title, startsAt]
+      properties:
+        _id: { type: string, readOnly: true }
+        title: { type: string }
+        startsAt: { type: string, format: date-time }
+        providerId: { type: string, writeOnly: true }
+        providerName: { type: string }
+        location: { type: string }
+        status: { type: string, enum: [planned, confirmed, completed, cancelled] }
+        notes: { type: string }
+        questionsToAsk: { type: array, items: { type: string } }
+        reminderMinutesBefore: { type: integer }
+    Connection:
+      type: object
+      properties:
+        _id: { type: string }
+        status: { type: string, enum: [pending, active, revoked, expired] }
+        scopes: { type: array, items: { type: string, enum: [summary, symptoms, triage, medications, contact, messages] } }
+        codeExpiresAt: { type: string, format: date-time }
+        unreadCount: { type: integer, description: Clinician view only }
+        needsAttention: { type: boolean, description: Clinician view only }
+    Message:
+      type: object
+      properties:
+        _id: { type: string }
+        senderRole: { type: string, enum: [patient, clinician] }
+        kind: { type: string, enum: [text, check_in_request, appointment_request] }
+        body: { type: string }
+        readAt: { type: string, format: date-time }
+        createdAt: { type: string, format: date-time }
+
+security:
+  - bearer: []
+
+paths:
+  /api/auth/register:
+    post:
+      tags: [Auth]
+      security: []
+      summary: Create an account (patient or clinician). Requires explicit consent.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password, acceptTerms, acceptPrivacy, consentHealthData]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string, minLength: 10, description: 'Letters and at least one number' }
+                displayName: { type: string }
+                role: { type: string, enum: [patient, clinician], default: patient }
+                onboardingCategories: { type: array, items: { type: string } }
+                acceptTerms: { const: true }
+                acceptPrivacy: { const: true }
+                consentHealthData: { const: true }
+                clinician:
+                  type: object
+                  description: Required when role=clinician. Account starts as pending verification.
+                  properties: { credentials: { type: string }, specialty: { type: string }, organization: { type: string }, npi: { type: string } }
+      responses:
+        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/Session' } } } }
+        '400': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+        '429': { $ref: '#/components/responses/Error' }
+  /api/auth/login:
+    post:
+      tags: [Auth]
+      security: []
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [email, password], properties: { email: { type: string }, password: { type: string } } } } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Session' } } } }
+        '401': { $ref: '#/components/responses/Error' }
+  /api/auth/refresh:
+    post:
+      tags: [Auth]
+      security: []
+      summary: Rotate refresh token. Reusing an old token revokes the whole session family.
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [refreshToken], properties: { refreshToken: { type: string } } } } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { type: object, properties: { accessToken: { type: string }, refreshToken: { type: string } } } } } }
+        '401': { $ref: '#/components/responses/Error' }
+  /api/auth/logout:
+    post:
+      tags: [Auth]
+      requestBody:
+        content: { application/json: { schema: { type: object, properties: { refreshToken: { type: string } } } } }
+      responses:
+        '204': { $ref: '#/components/responses/NoContent' }
+  /api/auth/logout-all:
+    post:
+      tags: [Auth]
+      summary: Sign out of all devices
+      responses:
+        '204': { $ref: '#/components/responses/NoContent' }
+  /api/auth/forgot-password:
+    post:
+      tags: [Auth]
+      security: []
+      summary: Always returns the same message, whether or not the email exists.
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [email], properties: { email: { type: string } } } } }
+      responses:
+        '200': { description: OK }
+  /api/auth/reset-password:
+    post:
+      tags: [Auth]
+      security: []
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [token, newPassword], properties: { token: { type: string }, newPassword: { type: string } } } } }
+      responses:
+        '200': { description: Password changed; all sessions revoked }
+        '400': { $ref: '#/components/responses/Error' }
+
+  /api/users/me:
+    get:
+      tags: [Users]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/User' } } } }
+    patch:
+      tags: [Users]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                displayName: { type: string }
+                onboardingCategories: { type: array, items: { type: string } }
+                onboardingComplete: { type: boolean }
+                contactPhone: { type: string }
+                settings: { type: object }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/User' } } } }
+    delete:
+      tags: [Users]
+      summary: Permanently delete account and all health data
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [password], properties: { password: { type: string } } } } }
+      responses:
+        '204': { $ref: '#/components/responses/NoContent' }
+        '401': { $ref: '#/components/responses/Error' }
+  /api/users/me/summary:
+    get:
+      tags: [Users]
+      summary: Readable health summary for sharing with a clinician
+      parameters:
+        - name: sections
+          in: query
+          schema: { type: string, default: 'profile,medications,symptoms,triage,appointments' }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { type: object, properties: { text: { type: string }, data: { type: object }, sections: { type: array, items: { type: string } } } } } } }
+  /api/users/me/export:
+    get:
+      tags: [Users]
+      summary: Export all stored data (portability)
+      responses:
+        '200': { description: OK }
+
+  /api/health-profile:
+    get:
+      tags: [HealthProfile]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/HealthProfile' } } } }
+    put:
+      tags: [HealthProfile]
+      summary: Replace the health profile (unknown fields rejected)
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/HealthProfile' } } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/HealthProfile' } } } }
+        '400': { $ref: '#/components/responses/Error' }
+
+  /api/questionnaires:
+    get:
+      tags: [Questionnaires]
+      summary: Current definition and the caller's in-progress questionnaire
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { type: object, properties: { definition: { $ref: '#/components/schemas/QuestionnaireDefinition' }, inProgress: { $ref: '#/components/schemas/Questionnaire' } } } } }
+    post:
+      tags: [Questionnaires]
+      summary: Start a new questionnaire (abandons any unfinished one)
+      responses:
+        '201': { description: Created }
+  /api/questionnaires/history:
+    get:
+      tags: [Questionnaires]
+      parameters: [{ $ref: '#/components/parameters/Page' }, { $ref: '#/components/parameters/Limit' }]
+      responses:
+        '200': { description: OK }
+  /api/questionnaires/{id}:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    get:
+      tags: [Questionnaires]
+      responses:
+        '200': { description: OK }
+        '404': { $ref: '#/components/responses/Error' }
+    patch:
+      tags: [Questionnaires]
+      summary: Save answers; runs emergency rules on every save
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [answers], properties: { answers: { $ref: '#/components/schemas/Answers' }, currentSection: { type: string } } } } }
+      responses:
+        '200':
+          description: Saved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  questionnaire: { $ref: '#/components/schemas/Questionnaire' }
+                  safetyCheck: { type: object, properties: { emergency: { type: boolean }, warnings: { type: array, items: { $ref: '#/components/schemas/Warning' } } } }
+        '400': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+  /api/questionnaires/{id}/submit:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      tags: [Questionnaires]
+      summary: Submit and evaluate. Emergency results are returned even if incomplete.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  questionnaire: { $ref: '#/components/schemas/Questionnaire' }
+                  triage: { $ref: '#/components/schemas/Triage' }
+                  recommendations: { type: array, items: { $ref: '#/components/schemas/Recommendation' } }
+        '400': { $ref: '#/components/responses/Error' }
+
+  /api/triage/evaluate:
+    post:
+      tags: [Triage]
+      summary: Stateless evaluation (nothing stored)
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [answers], properties: { answers: { $ref: '#/components/schemas/Answers' } } } } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { type: object, properties: { triage: { $ref: '#/components/schemas/Triage' }, recommendations: { type: array, items: { $ref: '#/components/schemas/Recommendation' } } } } } } }
+  /api/triage/history:
+    get:
+      tags: [Triage]
+      parameters: [{ $ref: '#/components/parameters/Page' }, { $ref: '#/components/parameters/Limit' }]
+      responses:
+        '200': { description: OK }
+  /api/recommendations:
+    get:
+      tags: [Triage]
+      summary: Recommendations and matching resources from the latest result
+      responses:
+        '200': { description: OK }
+
+  /api/symptoms:
+    get:
+      tags: [Symptoms]
+      parameters:
+        - { $ref: '#/components/parameters/Page' }
+        - { $ref: '#/components/parameters/Limit' }
+        - { name: from, in: query, schema: { type: string, format: date } }
+        - { name: to, in: query, schema: { type: string, format: date } }
+        - { name: type, in: query, schema: { type: string } }
+      responses:
+        '200': { description: OK }
+    post:
+      tags: [Symptoms]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/SymptomEntryInput' } } }
+      responses:
+        '201': { description: 'Created. safetyNudge is set for warning-type or worsening entries.' }
+        '400': { $ref: '#/components/responses/Error' }
+  /api/symptoms/{id}:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    get:
+      tags: [Symptoms]
+      responses:
+        '200': { description: OK }
+        '404': { $ref: '#/components/responses/Error' }
+    patch:
+      tags: [Symptoms]
+      requestBody:
+        content: { application/json: { schema: { $ref: '#/components/schemas/SymptomEntryInput' } } }
+      responses:
+        '200': { description: OK }
+        '404': { $ref: '#/components/responses/Error' }
+    delete:
+      tags: [Symptoms]
+      responses:
+        '204': { $ref: '#/components/responses/NoContent' }
+        '404': { $ref: '#/components/responses/Error' }
+
+  /api/providers:
+    get:
+      tags: [Providers]
+      summary: List/filter providers. Unverified attributes are returned as null.
+      parameters: &providerFilters
+        - { $ref: '#/components/parameters/Page' }
+        - { $ref: '#/components/parameters/Limit' }
+        - { name: q, in: query, schema: { type: string } }
+        - { name: specialty, in: query, schema: { type: string } }
+        - { name: state, in: query, schema: { type: string } }
+        - { name: city, in: query, schema: { type: string } }
+        - { name: postalCode, in: query, schema: { type: string }, description: 'Matches on 3-digit prefix until geocoding is integrated' }
+        - { name: telehealth, in: query, schema: { type: string, enum: ['true', 'false'] } }
+        - { name: language, in: query, schema: { type: string } }
+        - { name: insurance, in: query, schema: { type: string } }
+        - { name: verifiedOnly, in: query, schema: { type: string, enum: ['true', 'false'] } }
+        - { name: includeDemo, in: query, schema: { type: string, enum: ['true', 'false'], default: 'true' } }
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { allOf: [{ $ref: '#/components/schemas/PageMeta' }, { type: object, properties: { items: { type: array, items: { $ref: '#/components/schemas/Provider' } } } }] } } }
+  /api/providers/search:
+    get:
+      tags: [Providers]
+      parameters: *providerFilters
+      responses:
+        '200': { description: OK }
+  /api/providers/saved:
+    get:
+      tags: [Providers]
+      responses:
+        '200': { description: OK }
+  /api/providers/{id}:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    get:
+      tags: [Providers]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Provider' } } } }
+        '404': { $ref: '#/components/responses/Error' }
+  /api/providers/{id}/save:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      tags: [Providers]
+      requestBody:
+        content: { application/json: { schema: { type: object, properties: { note: { type: string } } } } }
+      responses:
+        '201': { description: Saved }
+    delete:
+      tags: [Providers]
+      responses:
+        '204': { $ref: '#/components/responses/NoContent' }
+
+  /api/resources:
+    get:
+      tags: [Resources]
+      security: []
+      parameters: &resourceFilters
+        - { $ref: '#/components/parameters/Page' }
+        - { $ref: '#/components/parameters/Limit' }
+        - { name: topic, in: query, schema: { type: string } }
+        - { name: q, in: query, schema: { type: string } }
+      responses:
+        '200': { description: OK }
+  /api/resources/search:
+    get:
+      tags: [Resources]
+      security: []
+      parameters: *resourceFilters
+      responses:
+        '200': { description: OK }
+  /api/resources/{id}:
+    get:
+      tags: [Resources]
+      security: []
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string }, description: 'Object id or slug' }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Resource' } } } }
+        '404': { $ref: '#/components/responses/Error' }
+
+  /api/appointments:
+    get:
+      tags: [Appointments]
+      parameters:
+        - { $ref: '#/components/parameters/Page' }
+        - { $ref: '#/components/parameters/Limit' }
+        - { name: upcoming, in: query, schema: { type: string, enum: ['true', 'false'] } }
+      responses:
+        '200': { description: OK }
+    post:
+      tags: [Appointments]
+      summary: Record an appointment (does NOT book with the provider)
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/Appointment' } } }
+      responses:
+        '201': { description: Created }
+  /api/appointments/{id}:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    patch:
+      tags: [Appointments]
+      requestBody:
+        content: { application/json: { schema: { $ref: '#/components/schemas/Appointment' } } }
+      responses:
+        '200': { description: OK }
+        '404': { $ref: '#/components/responses/Error' }
+    delete:
+      tags: [Appointments]
+      responses:
+        '204': { $ref: '#/components/responses/NoContent' }
+
+  /api/connections:
+    get:
+      tags: [Connections]
+      summary: Patient sees their clinicians; clinician sees patients sorted by needs-attention
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { type: object, properties: { items: { type: array, items: { $ref: '#/components/schemas/Connection' } } } } } } }
+  /api/connections/invite:
+    post:
+      tags: [Connections]
+      summary: Patient creates a one-time share code (returned once, expires)
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [scopes], properties: { scopes: { type: array, items: { type: string, enum: [summary, symptoms, triage, medications, contact, messages] } } } } } }
+      responses:
+        '201': { description: Created, content: { application/json: { schema: { type: object, properties: { id: { type: string }, code: { type: string, examples: [ABCD-EF23] }, expiresAt: { type: string, format: date-time } } } } } }
+  /api/connections/accept:
+    post:
+      tags: [Connections]
+      summary: Verified clinician redeems a share code
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [code], properties: { code: { type: string } } } } }
+      responses:
+        '200': { description: Connected }
+        '400': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+  /api/connections/{id}:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    patch:
+      tags: [Connections]
+      summary: Patient changes what is shared
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, properties: { scopes: { type: array, items: { type: string } } } } } }
+      responses:
+        '200': { description: OK }
+    delete:
+      tags: [Connections]
+      summary: Either party disconnects
+      responses:
+        '204': { $ref: '#/components/responses/NoContent' }
+  /api/connections/{id}/summary:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    get:
+      tags: [Connections]
+      summary: Clinician view of shared patient information (audit-logged)
+      responses:
+        '200': { description: OK }
+        '404': { $ref: '#/components/responses/Error' }
+  /api/connections/{id}/messages:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    get:
+      tags: [Connections]
+      parameters: [{ $ref: '#/components/parameters/Page' }, { $ref: '#/components/parameters/Limit' }]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { type: object, properties: { items: { type: array, items: { $ref: '#/components/schemas/Message' } } } } } } }
+    post:
+      tags: [Connections]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [body], properties: { body: { type: string }, kind: { type: string, enum: [text, check_in_request, appointment_request] } } } } }
+      responses:
+        '201': { description: Sent }
+
+  /api/dashboard:
+    get:
+      tags: [Dashboard]
+      summary: Next action, warnings, recent symptoms, appointments, saved providers, resources. No numeric risk scores.
+      responses:
+        '200': { description: OK }
+
+  /api/admin/providers:
+    post:
+      tags: [Admin]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/Provider' } } } }
+      responses:
+        '201': { description: Created (unverified) }
+  /api/admin/providers/{id}:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    patch:
+      tags: [Admin]
+      requestBody: { content: { application/json: { schema: { $ref: '#/components/schemas/Provider' } } } }
+      responses:
+        '200': { description: OK }
+  /api/admin/providers/{id}/verify:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      tags: [Admin]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [status, source], properties: { status: { type: string, enum: [verified, unverified] }, source: { type: string } } } } }
+      responses:
+        '200': { description: OK }
+  /api/admin/clinicians:
+    get:
+      tags: [Admin]
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [pending, verified, rejected] } }
+      responses:
+        '200': { description: OK }
+  /api/admin/clinicians/{id}/verify:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      tags: [Admin]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [status, source], properties: { status: { type: string, enum: [verified, rejected] }, source: { type: string } } } } }
+      responses:
+        '200': { description: OK }
+  /api/admin/resources:
+    put:
+      tags: [Admin]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/Resource' } } } }
+      responses:
+        '200': { description: Upserted }
+  /api/admin/audit-logs:
+    get:
+      tags: [Admin]
+      parameters: [{ $ref: '#/components/parameters/Page' }, { $ref: '#/components/parameters/Limit' }]
+      responses:
+        '200': { description: OK }
